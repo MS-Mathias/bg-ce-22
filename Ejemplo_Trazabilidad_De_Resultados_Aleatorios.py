@@ -1,3 +1,16 @@
+'''
+Cuando se realiza una simulación con funciones aleatorias, los resultados
+seran únicos para esa simulación con lo cual hay que pensar en algún metodo
+para replicar los resultados de la simulación en diversas instancias sin
+utilizar una semilla al inicio, ya que esto generaría un patrón predecible
+en la simulación.
+
+Para esto se construyó este codigo a modo ejemplo donde se comienza por
+almacenar el estado inicial de aleatoriedad en una variable utilizando la
+función get_state() y posteriormente posteriormente restaurando el estado
+inicial con la función set_state().
+'''
+
 # Importo numpy para generar las series aleatorias
 import numpy as np
 
