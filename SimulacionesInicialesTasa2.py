@@ -106,6 +106,9 @@ N = 252
 M = 1000
 TasasSim = np.transpose(VasicekMultiSim(M, N, r0, lamda, media, sigma))
 TasasSim = TratamientoTasas(TasasSim)
+TasasSim = np.transpose(TasasSim)
+TasasSimDF = pd.DataFrame(TasasSim)
+TasasSimDF["Dias"] = np.arange(1,len(TasasSimDF)+1)
 
 #Importo Activos
 Activos = pd.read_excel("C:/Users/mathias.ezequiel.va1/Desktop/Activos.xlsx")
@@ -117,7 +120,7 @@ Activos.drop(['Vencimiento','Identificador'],axis=1,inplace=True)
 
 #Hago un left join de las tasas a la tabla de activos con dias como union
 ActivosSim = pd.merge(Activos.groupby(["Dias"]).sum(),
-                       Tasas,
+                       TasasSimDF,
                        how="left",
                        on="Dias")
 
