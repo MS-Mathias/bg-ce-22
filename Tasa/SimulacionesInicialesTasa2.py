@@ -80,6 +80,17 @@ def TratamientoTasas(TasasSim):
     TasasAcum = np.array(TasasAcum)
     return TasasAcum
 
+def UnionSeries(Serie1,SerieTasas,Union):
+    SerieUnion = pd.merge(Serie1.groupby([Union]).sum(),
+                           SerieTasas,
+                           how="left",
+                           on=Union)
+    return SerieUnion
+
+def ActualizarValores():
+    pass
+
+
 ###############################################
 
 #Importo las tasas esto es temporal hasta que tengamos los inputs oficiales
@@ -98,12 +109,14 @@ media = params[1]
 sigma = params[2]
 r0 = params[3]
 del params
-N = 252
+years = 2
+N = years * 252
+t = np.arange(0,N)/252
 
 ###############################################
 
 #Simulo tasas
-M = 1000
+M = 10000
 TasasSim = np.transpose(VasicekMultiSim(M, N, r0, lamda, media, sigma))
 TasasSim = TratamientoTasas(TasasSim)
 TasasSim = np.transpose(TasasSim)
@@ -114,17 +127,22 @@ TasasSimDF["Dias"] = np.arange(1,len(TasasSimDF)+1)
 Activos = pd.read_excel("C:/Users/mathias.ezequiel.va1/Desktop/Activos.xlsx")
 
 #Agrego columna "Dias" y elimino columnas "vencimiento" e "identificador"
-Activos["Dias"] = (Activos["Vencimiento"] * 252) // 1
+Activos["Dias"] = (Activos["Vencimiento"] * 360) // 1
 Activos.drop(['Vencimiento','Identificador'],axis=1,inplace=True)
 
-
 #Hago un left join de las tasas a la tabla de activos con dias como union
-ActivosSim = pd.merge(Activos.groupby(["Dias"]).sum(),
-                       TasasSimDF,
-                       how="left",
-                       on="Dias")
+ActivosSim = UnionSeries(Activos, TasasSimDF, "Dias")
 
 #Actualizo montos con las tasas
 for i in range(M):
     ActivosSim.iloc[:,i+2]=ActivosSim["Monto"]/(1+ActivosSim.iloc[:,i+2])
 
+ActivosSim_arr = ActivosSim.values
+ActivosSim_arr = np.delete(ActivosSim_arr,[0,1],axis=1)
+ValorFinal = np.sum(ActivosSim_arr,axis=0)
+
+plt.hist(ValorFinal)
+plt.ylabel("Simulaciones")
+plt.xlabel("Valor de Activos")
+plt.title("Activos Actualizados")
+plt.show()
