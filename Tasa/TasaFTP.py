@@ -1,27 +1,46 @@
-#%% Import de librerias relevantes
+# %% Import de librerias relevantes
+
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import time
 start = time.time()
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.interpolate import make_interp_spline
 
-#%% Funcion que extrae los dias de los nodos
-def extractoNodos(N = 10):
-    n = np.arange(120) * 30 + 30
-    return n
-#%% Funcion que genera df de diferencia de tasas para todos los nodos
-def DiferenciaNodos(df):
-    df1 = df.copy()
-    for nodo in df1:   
+# %% Funciones para las Simulacion de Tasas de Interes
+
+
+def parametrosSimulaciones(tasasInput,LugarBalance,Moneda):
+    dfDiferencia = DiferenciaNodos(tasasInput.loc[(tasasInput["LugarBalance"]==LugarBalance) & 
+                                                  (tasasInput["Moneda"]==Moneda),
+                                                  tasasInput.columns.values.tolist()[1:11]])
+    
+    dfCovarianza = dfDiferencia.cov()
+    cholesky = np.linalg.cholesky(dfCovarianza)
+    
+    return dfDiferencia, dfCovarianza, cholesky
+
+def DiferenciaNodos(tasasInput):
+    df1 = tasasInput.copy()
+    for nodo in df1:
         if nodo == "Date":
             continue
         else:
-            n = int(nodo[0:len(nodo)-1])
             df1[nodo] = df1[nodo].diff(90)
     return df1
 
-#%% Funcion que genera los shocks independientes
+# %% Funciones que simulan las curvas y las interpola
+
+
+def simulacionCurva(dfDiferencia, ultimaCurva, cholesky, M=1000):
+    arraySimulaciones = np.zeros(shape=(M, len(ultimaCurva)))
+    for i in range(M):
+        shockIndep = np.array(shockIndependiente(dfDiferencia))
+        shockCorr = np.array(shockCorrelacionado(shockIndep, cholesky))
+        curvaSimulada = np.add(ultimaCurva, shockCorr)
+        arraySimulaciones[i] = curvaSimulada
+    return arraySimulaciones
+
 def shockIndependiente(df):
     VectorShock = []
     average = {}
@@ -41,92 +60,169 @@ def shockIndependiente(df):
         VectorShock.append(shock)
     return VectorShock
 
-#%% Funcion que genera los shocks dependientes
 def shockCorrelacionado(shockIndependiente, cholesky):
     shockCorrelacionado = []
     for nodo in cholesky:
-        shockCorrelacionado.append(np.dot(shockIndependiente,nodo))
+        shockCorrelacionado.append(np.dot(shockIndependiente, nodo))
     return shockCorrelacionado
-#%% Funcion que simula m veces la siguiente curva
-def simulacionCurva(dfDiferencia, M = 1000):
-    arraySimulaciones = np.zeros(shape=(M,len(ultimaCurva)))
-    for i in range(M):
-        shockIndep = np.array(shockIndependiente(dfDiferencia))
-        shockCorr = np.array(shockCorrelacionado(shockIndep, cholesky))
-        curvaSimulada = np.add(ultimaCurva,shockCorr)
-        arraySimulaciones[i] = curvaSimulada
-    return arraySimulaciones
 
-#%% Funcion que transforma las simulaciones para graficar smooth lines
-def smoothLine(arraySimulaciones,N=500):
-    smoothArray = np.zeros((len(arraySimulaciones),N))
-    t = np.arange(12)*30+30
-    Xline = np.linspace(t.min(), t.max(), N)
-    for i in range(len(arraySimulaciones)):
-        XY_Spline = make_interp_spline(t, arraySimulaciones[i])
-        Yline = XY_Spline(Xline)
-        smoothArray[i] = Yline
-    smoothArray = smoothArray.transpose()
-    return Xline, smoothArray
-
-#%% Funcion que genera tasas para todos los nodos
-def interpolaTasas(dfSimulaciones,nodosTasas):
+def interpolaTasas(dfSimulaciones, nodosTasas):
     Tasas = pd.DataFrame(columns=nodosTasas)
     for nodo in nodosTasas:
         if nodo in dfSimulaciones:
             Tasas[nodo] = dfSimulaciones[nodo]
     del nodo
-    
+
     for i in range(len(nodosTasas)):
         if pd.isnull(Tasas[nodosTasas[i]])[0]:
-            for j in range(i+1,len(nodosTasas)):
+            shift = 0
+            for j in range(i+shift+1, len(nodosTasas)):
                 if not pd.isnull(Tasas[nodosTasas[j]])[0]:
-                    difTasas = Tasas[nodosTasas[j]] - Tasas[nodosTasas[i-1]]
-                    difFechas = nodosTasas[j] - nodosTasas[i]
-                    Tasas[nodosTasas[i]] = Tasas[nodosTasas[i-1]] + difTasas * (nodosTasas[i]-nodosTasas[i-1]) / difFechas
+                    a = Tasas[nodosTasas[j]] - Tasas[nodosTasas[i-1]]
+                    b = nodosTasas[i] - nodosTasas[i-1]
+                    c = nodosTasas[j] - nodosTasas[i-1]
+                    x = Tasas[nodosTasas[i-1]] + (a * b / c)
+                    Tasas[nodosTasas[i]] = x
                     break
         else:
+            shift = 0
             continue
     return Tasas
 
-#%% Input del modelo
-dfInput = pd.read_excel("C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/TasaFTP.xlsx")
-ultimaCurva = dfInput.iloc[-1,1:].values
-nodosTasas = extractoNodos(dfInput)
-Caidas = pd.read_excel("C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/Caidas tasa.xlsx")
+# %% Funciones que actualizan las caidas por sus respectivas tasas.
 
-#%% Genero el un df con las diferencias de tasas
-dfDiferencia = DiferenciaNodos(dfInput)
 
-#%% Genera la matriz covarianza y de Cholesky
-dfCovarianza = dfDiferencia.cov()
-cholesky = np.linalg.cholesky(dfCovarianza)
+def ValorActualiza(Caidas, Tasas, LugarBalance, Moneda, M = 1000):
+    A= separaCaidas(Caidas, LugarBalance, Moneda)
+    
+    Actualizados = actualizaSimulaciones(A, Tasas.values, M)
+    
+    return Actualizados
 
-#%% Simulo M veces la siguiente curva y generlo un array con todos los resultados
-M = 1000
-arraySimulaciones = simulacionCurva(dfDiferencia,M)
-dfSimulaciones = pd.DataFrame(arraySimulaciones, columns=[30,90,180,360,540,720,1080,1800,2160,3600,1,2])
+def separaCaidas(Caidas, LugarBalance, Moneda):
+    CaidasSep = Caidas.fillna(0)[(Caidas["Moneda"] == Moneda) & (
+        Caidas["LugarBalance"] == LugarBalance)].values[:, 4:]
+    return CaidasSep
 
-#%% Interpola tasas para tener la tasa de todas las fechas
-Tasas = interpolaTasas(dfSimulaciones, nodosTasas)
+def actualizaSimulaciones(arrayCaidas, arrayTasas, M=1000):
+    Resultados = []
+    for i in range(M):
+        Resultados.append(actualizaCartera(arrayCaidas, arrayTasas[i]))
+    return Resultados
 
-#%% Grafico para ver nodos simulados
-Xline, smoothArray = smoothLine(arraySimulaciones)
-plt.plot(nodosTasas,Tasas.values.transpose())
-plt.xlim(30, 3600)
-plt.xticks(np.arange(0, 3601, 360))
-plt.ylabel("Tasa FTP")
-plt.xlabel("Tiempo (días)")
-plt.title("Simulación de Tasas de Interés 360 días")
-plt.show()
+def actualizaCartera(arrayCaidas, Tasas):
+    ValorCartera = 0
+    for Caida in arrayCaidas:
+        ValorCartera += actualizaCaida(Caida, Tasas)
+    return ValorCartera
 
-#%% 
-CaidasPesos = Caidas[Caidas["Moneda"] == "ARS"]
-CaidasDolar = Caidas[Caidas["Moneda"] == "USD"]
-CaidaTest = CaidasPesos.loc[6]
-for nodo in Tasas:
-    Tasas[nodo] = CaidaTest[nodo] / (1 + Tasas[nodo]) ** (nodo / 360)
+def actualizaCaida(Caida, Tasas):
+    ValorActual = 0
+    for i in range(len(Tasas)):
+        ValorActual += Caida[i] / (1+Tasas[i]) ** ((i*30+30) / 360)
+    return ValorActual
 
-#%% Time report
+def netoSimulaciones(Activo, Pasivo, M=1000):
+    ResultadoNeto = []
+    for i in range(M):
+        ResultadoNeto.append(Activo[i] - Pasivo[i])
+    return ResultadoNeto
+
+# %% Funcion que actualiza las distintas aperturas de caidas
+
+def loopActualiza(Caidas,tasasInput,M):
+    ValorActual = {}
+    start = time.time()
+    for LugarBalance in LB:
+        ValorActual_assist = {}
+        for Moneda in TS:
+            dfDiferencias, dfCovarianza, cholesky = parametrosSimulaciones(tasasInput,LugarBalance,Moneda)
+
+            dfSimulaciones = pd.DataFrame(simulacionCurva(dfDiferencias,
+                                                          tasasInput.loc[(tasasInput["LugarBalance"]==LugarBalance) & 
+                                                                         (tasasInput["Moneda"]==Moneda),
+                                                                         tasasInput.columns.values.tolist()[1:11]].iloc[-1], 
+                                                          cholesky, 
+                                                          M), 
+                                          columns=[30, 90, 180, 360, 540, 720, 1080, 1800, 2160, 3600])
+
+            Tasas = interpolaTasas(dfSimulaciones, nodosTasas)
+            
+            end = time.time()
+            print(f'el codigo tarda {end - start} segundos en realizar las {M} simulaciones para la tasa {LugarBalance} {Moneda} ')
+            start = time.time()
+            
+            ValorActual_assist[Moneda] = ValorActualiza(Caidas, Tasas, LugarBalance, Moneda, M)
+            
+            end = time.time()
+            print(f'el codigo tarda {end - start} segundos en actualizar los activos de {LugarBalance} {Moneda} ')
+            start = time.time()
+            
+        ValorActual[LugarBalance] = ValorActual_assist
+    return ValorActual
+
+def calculaCE(ValoresActuales,cotizaUSD):
+    CE = {}
+    for i in TS:
+        Activo = ValoresActuales["Activo"][i]
+        Pasivo = ValoresActuales["Pasivo"][i]
+        diferencia = [e1 - e2 for e1, e2 in zip(Activo,Pasivo)]
+        CE[i] = np.percentile(diferencia, 99.9)
+    return CE
+
+# %% Inputs del modelo
 end = time.time()
-print(f'el codigo tarda {end - start} segundos en correr {M} simulaciones')
+print(f'el codigo tarda {end - start} segundos en definir las funciones')
+start = time.time()
+
+Caidas = pd.read_excel(
+    "C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/Caidas tasa.xlsx")
+tasaAFTP = pd.read_excel(
+    "C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/ActivosFTP.xlsx")
+tasaAUSD = pd.read_excel(
+    "C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/ActivosUSD.xlsx")
+tasaACER = pd.read_excel(
+    "C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/ActivosCER.xlsx")
+tasaPFTP = pd.read_excel(
+    "C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/PasivosFTP.xlsx")
+tasaPUSD = pd.read_excel(
+    "C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/PasivosUSD.xlsx")
+tasaPCER = pd.read_excel(
+    "C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/PasivosCER.xlsx")
+
+tasaAFTP["LugarBalance"],tasaAFTP["Moneda"] = "Activo", "ARS"
+tasaAUSD["LugarBalance"],tasaAUSD["Moneda"] = "Activo", "USD"
+tasaACER["LugarBalance"],tasaACER["Moneda"] = "Activo", "CER"
+tasaPFTP["LugarBalance"],tasaPFTP["Moneda"] = "Pasivo", "ARS"
+tasaPUSD["LugarBalance"],tasaPUSD["Moneda"] = "Pasivo", "USD"
+tasaPCER["LugarBalance"],tasaPCER["Moneda"] = "Pasivo", "CER"
+ 
+frames = [tasaAFTP, tasaAUSD, tasaACER, tasaPFTP, tasaPUSD, tasaPCER]
+    
+tasasInput = pd.concat(frames)
+
+
+end = time.time()
+print(f'el codigo tarda {end - start} segundos en realizar el input de tasas y caidas')
+start = time.time()
+
+nodosTasas = np.arange(120) * 30 + 30
+
+# %% Simulo M veces la siguiente curva y generlo un array con todos los resultados
+
+M = 10000
+
+LB = ["Activo","Pasivo"]
+TS = ["ARS","USD","CER"]
+
+ValoresActuales = loopActualiza(Caidas,tasasInput,M)
+
+cotizaUSD = 200
+
+CapitalEconomico = calculaCE(ValoresActuales, cotizaUSD)
+
+
+# %% Time report
+
+end = time.time()
+print(f'el codigo tarda {end - start} segundos en correr {M} simulaciones para todas las tasas')
