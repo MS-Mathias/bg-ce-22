@@ -300,19 +300,19 @@ print(f'el codigo tarda {end - start:.2f} segundos en definir las funciones')
 start = time.time()
 
 Caidas = pd.read_excel(
-    "C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/Caidas tasa.xlsx")
+    "Caidas tasa.xlsx")
 tasaAFTP = pd.read_excel(
-    "C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/Tasas Pasivas y Activas Diarias.xls", "Activa Pesos Fija")
+    "Tasas Pasivas y Activas Diarias.xlsx", "Activa Pesos Fija")
 tasaAUSD = pd.read_excel(
-    "C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/Tasas Pasivas y Activas Diarias.xls", "Activa Dolares Fija")
+    "Tasas Pasivas y Activas Diarias.xlsx", "Activa Dolares Fija")
 tasaACER = pd.read_excel(
-    "C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/Tasas Pasivas y Activas Diarias.xls", "Activa Pesos Fija")
+    "Tasas Pasivas y Activas Diarias.xlsx", "Activa Pesos Fija")
 tasaPFTP = pd.read_excel(
-    "C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/Tasas Pasivas y Activas Diarias.xls", "Pasiva Pesos Fija")
+    "Tasas Pasivas y Activas Diarias.xlsx", "Pasiva Pesos Fija")
 tasaPUSD = pd.read_excel(
-    "C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/Tasas Pasivas y Activas Diarias.xls", "Pasiva Dolares Fija")
+    "Tasas Pasivas y Activas Diarias.xlsx", "Pasiva Dolares Fija")
 tasaPCER = pd.read_excel(
-    "C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/Fase2/Tasa/InputsFalsos/Tasas Pasivas y Activas Diarias.xls", "Pasiva Pesos Fija")
+    "Tasas Pasivas y Activas Diarias.xlsx", "Pasiva Pesos Fija")
 
 tasaAFTP["LugarBalance"], tasaAFTP["Moneda"] = "Activo", "ARS"
 tasaAUSD["LugarBalance"], tasaAUSD["Moneda"] = "Activo", "USD"
@@ -347,7 +347,7 @@ nodosTasas = np.arange(120) * 30 + 30
 
 # %% Simulo M veces la siguiente curva y generlo un array con todos los resultados
 
-M = 10000
+M = 10
 LB = ["Activo", "Pasivo"]
 TS = ["ARS", "USD", "CER"]
 d = {"LugarBalance":["Activo","Activo","Activo","Pasivo","Pasivo","Pasivo"],"Moneda":["ARS","USD","CER","ARS","USD","CER"],"Grupo":["A","B","C","A","B","C"]}
