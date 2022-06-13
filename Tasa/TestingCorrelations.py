@@ -4,6 +4,7 @@
 import numpy as np 
 import pandas as pd 
 import time
+from tqdm import tqdm
 
 start = time.time()
 
@@ -70,56 +71,44 @@ def simulacionCurva(dfDiferencia, ultimaCurva, cholesky, M=1000, arrayShockIndep
         M : Interger
             Es el numero de simulaciones definido por default como 1.000 
     """
+    
+    avg = {}
+    std = {}
+    nodosAsist = ultimaCurva.index
+    
+    for nodo in dfDiferencia:                                                   ### ciclo todos los nodos
+        avg[nodo] = dfDiferencia[nodo].mean()                                   ### calculo el promedio del nodo
+        std[nodo] = dfDiferencia[nodo].std()                                    ### calculo el desvio del nodo
+        
     if type(arrayShockIndependiente) == str:
+
+        arraySimulaciones = np.zeros(shape=(M, len(ultimaCurva)))               ### Genero Array para almacenar las simulaciones
+
+        arrayRandom = np.random.rand(M,len(ultimaCurva))                        ### Genero array de valores aleatorios
+        dfRandom = pd.DataFrame(arrayRandom,columns = nodosAsist)               ### paso el array a un df de pandas para operar por nodos
+
+        for nodo in dfRandom:                                                   ### ciclo todos los nodos
+            dfRandom[nodo] = ((dfDiferencia[nodo].quantile(
+                dfRandom[nodo]) - avg[nodo]) / std[nodo]).values                ### tomo el percentil y lo estandarizo
+
+        arrayShockIndependiente = dfRandom.values                               ### Guardo el array de shocks independientes
+
+        for i in tqdm(range(M)):                                                      ### ciclo a travez de todas las simulaciones
+            shockIndep = arrayShockIndependiente[i]                             ### tomo el shock aleatorio independiente de la simulacion
+            shockCorr = np.array(shockCorrelacionado(shockIndep, cholesky))     ### uso la funcion shockCorrelacionado para correlacionar los shocks
+            curvaSimulada = np.add(ultimaCurva, shockCorr)                      ### sumo la curva de shocks correlacionados a la ultima curva
+            arraySimulaciones[i] = curvaSimulada                                ### guardo la curva simulada en el array de simulaciones
+
+    else:                                                                       ### aca se realiza el mismo proceso de antes, tomando los shocks aleatorios de una tasa ya simulada y correlacionada
         arraySimulaciones = np.zeros(shape=(M, len(ultimaCurva)))
-        arrayShockInependiente = np.zeros(shape=(M,len(ultimaCurva)))
-        for i in range(M):
-            shockIndep = np.array(shockIndependiente(dfDiferencia))
-            shockCorr = np.array(shockCorrelacionado(shockIndep, cholesky))
-            curvaSimulada = np.add(ultimaCurva, shockCorr)
-            arraySimulaciones[i] = curvaSimulada
-            arrayShockInependiente[i] = shockIndep
-            
-    else:
-        arraySimulaciones = np.zeros(shape=(M, len(ultimaCurva)))
-        for i in range(M):
+        for i in tqdm(range(M)):
             shockIndep = arrayShockIndependiente[i]
             shockCorr = np.array(shockCorrelacionado(shockIndep, cholesky))
             curvaSimulada = np.add(ultimaCurva, shockCorr)
             arraySimulaciones[i] = curvaSimulada
-            arrayShockInependiente = arrayShockIndependiente
+            arrayShockIndependiente = arrayShockIndependiente
             
-    return arraySimulaciones, arrayShockInependiente
-
-
-
-def shockIndependiente(dfDiferencia):
-    """Genera a partir del DataFrame de diferencias de tasas,
-    una lista de shocks intependientes para cada nodo de la curva de tasas.
-    
-    Parametros
-        ----------
-        dfDiferencia : DataFrame
-            Serie historica de variaciones de tasas
-    """
-    
-    VectorShock = []
-    average = {}
-    std = {}
-    for nodo in dfDiferencia:
-        if nodo == "Date":
-            continue
-        else:
-            average[nodo] = dfDiferencia[nodo].mean()
-            std[nodo] = dfDiferencia[nodo].std()
-    for nodo in dfDiferencia:
-        if nodo == "Date":
-            continue
-        else:
-            percentil = dfDiferencia[nodo].quantile(np.random.rand())
-            shock = (percentil - average[nodo]) / std[nodo]
-        VectorShock.append(shock)
-    return VectorShock
+    return arraySimulaciones, arrayShockIndependiente
 
 
 def shockCorrelacionado(shockIndependiente, cholesky):
@@ -160,7 +149,7 @@ def interpolaTasas(dfSimulaciones, nodosTasas):
             Tasas[nodo] = dfSimulaciones[nodo]
     del nodo
 
-    for i in range(len(nodosTasas)):
+    for i in tqdm(range(len(nodosTasas))):
         if pd.isnull(Tasas[nodosTasas[i]])[0]:
             shift = 0
             for j in range(i+shift+1, len(nodosTasas)):
@@ -190,22 +179,16 @@ def ValorActualiza(Caidas, Tasas, LugarBalance, Moneda, M=1000):
 
 def actualizaSimulaciones(arrayCaidas, arrayTasas, M=1000):
     Resultados = []
-    for i in range(M):
-        Resultados.append(actualizaCartera(arrayCaidas, arrayTasas[i]))
+    for i in tqdm(range(M)):
+        Resultados.append(actualizaCaida(arrayCaidas.sum(axis=0), arrayTasas[i]))
     return Resultados
-
-
-def actualizaCartera(arrayCaidas, Tasas):
-    ValorCartera = 0
-    for Caida in arrayCaidas:
-        ValorCartera += actualizaCaida(Caida, Tasas)
-    return ValorCartera
 
 
 def actualizaCaida(Caida, Tasas):
     ValorActual = 0
     for i in range(len(Tasas)):
-        ValorActual += Caida[i] / (1+Tasas[i]) ** ((i*30+30) / 360)
+        if Caida[i] != 0:
+            ValorActual += Caida[i] / (1+Tasas[i]) ** ((i*30+30) / 360)
     return ValorActual
 
 # %% Funcion que actualiza las distintas aperturas de caidas
@@ -214,70 +197,67 @@ def actualizaCaida(Caida, Tasas):
 def loopActualiza(Caidas, tasasInput, nodosTasas, M, correlaciones):
 
     ValorActual = {}
-    start = time.time()
     dicSimulacionesCorr = {}
     
     for LugarBalance in LB:
 
         ValorActual_assist = {}
         for Moneda in TS:
-
-            dfDiferencias, dfCovarianza, cholesky = parametrosSimulaciones(
+            print(f"""==============================
+Comienza proceso para la tasa {LugarBalance} {Moneda}""")
+                  
+            dfDiferencia, dfCovarianza, cholesky = parametrosSimulaciones(
                 tasasInput, LugarBalance, Moneda)
-
-            if dfDiferencias.iloc[90:].isnull().any().any():
+            
+            if dfDiferencia.iloc[90:].isnull().any().any():
                 print("El DataFrame de diferencias de tasas contiene valores nulos \n")
                 raise SystemExit()
-
+                
             if dfCovarianza.isnull().any().any():
                 print("La matriz de covarianza tiene valores nulos")
                 raise SystemExit()
-            
+                
             Grupo = str(correlaciones.loc[(correlaciones["LugarBalance"] == LugarBalance) & 
                                   (correlaciones["Moneda"] == Moneda)].values[:,-1][0])
             
+            print("Simulo Tasa")
+            
             if not(Grupo in dicSimulacionesCorr):
-                arrayTasasSimuladas, arrayShockInependiente = simulacionCurva(dfDiferencias,
+                arrayTasasSimuladas, arrayShockInependiente = simulacionCurva(dfDiferencia,
                                                                               tasasInput.loc[(tasasInput["LugarBalance"] == LugarBalance) &
                                                                                              (tasasInput["Moneda"] == Moneda),
                                                                                              tasasInput.columns.values.tolist()[1:len(tasasInput.columns)-2]].iloc[-1],
                                                                               cholesky,
                                                                               M)
                 dicSimulacionesCorr[Grupo] = arrayShockInependiente
+                
             else:
-                arrayTasasSimuladas, arrayShockInependiente = simulacionCurva(dfDiferencias,
+                arrayTasasSimuladas, arrayShockInependiente = simulacionCurva(dfDiferencia,
                                                                               tasasInput.loc[(tasasInput["LugarBalance"] == LugarBalance) &
                                                                                              (tasasInput["Moneda"] == Moneda),
                                                                                              tasasInput.columns.values.tolist()[1:len(tasasInput.columns)-2]].iloc[-1],
                                                                               cholesky,
                                                                               M,
                                                                               dicSimulacionesCorr[Grupo])
+                
             dfSimulaciones = pd.DataFrame(arrayTasasSimuladas,
                                               columns=[30, 60, 90, 120, 150, 180, 270, 360, 450, 540, 720, 900, 1080, 1260, 1440, 1620, 1800, 2160, 3600])
-
+            
             if dfSimulaciones.isnull().any().any():
                 print("El DataFrame de Simulaciones de tasas contiene valores nulos")
                 raise SystemExit()
-
+                
+            print("Interpolo Tasas")
             Tasas = interpolaTasas(dfSimulaciones, nodosTasas)
-
+            
             if Tasas.isnull().any().any():
                 print("El DataFrame de tasas interpoladas contiene valores nulos")
                 raise SystemExit()
-
-            end = time.time()
-            print(
-                f'el codigo tarda {end - start:.2f} segundos en realizar las {M} simulaciones para la tasa {LugarBalance} {Moneda} ')
-            start = time.time()
-
+                
+            print("Actualizo Caidas")
             ValorActual_assist[Moneda] = ValorActualiza(
                 Caidas, Tasas, LugarBalance, Moneda, M)
-
-            end = time.time()
-            print(
-                f'el codigo tarda {end - start:.2f} segundos en actualizar los activos de {LugarBalance} {Moneda} ')
-            start = time.time()
-
+            
         ValorActual[LugarBalance] = ValorActual_assist
     return ValorActual, dicSimulacionesCorr
 
@@ -347,7 +327,7 @@ nodosTasas = np.arange(120) * 30 + 30
 
 # %% Simulo M veces la siguiente curva y generlo un array con todos los resultados
 
-M = 100
+M = 100000
 LB = ["Activo", "Pasivo"]
 TS = ["ARS", "USD", "CER"]
 d = {"LugarBalance":["Activo","Activo","Activo","Pasivo","Pasivo","Pasivo"],
@@ -356,7 +336,7 @@ d = {"LugarBalance":["Activo","Activo","Activo","Pasivo","Pasivo","Pasivo"],
 correlaciones = pd.DataFrame(d)
 
 ValoresActuales,Simulaciones = loopActualiza(Caidas, tasasInput, nodosTasas, M, correlaciones)
-
+print("==============================")
 CapitalEconomico = calculaCE(ValoresActuales)
 
 
@@ -365,4 +345,4 @@ CapitalEconomico = calculaCE(ValoresActuales)
 end = time.time()
 print(
     f'el codigo tarda {end - start:.2f} segundos en correr {M} simulaciones para todas las tasas')
-#del start, end, M, frames, nodosTasas
+del start, end, M, frames, nodosTasas, tasaAFTP, tasaAUSD, tasaACER, tasaPFTP, tasaPUSD, tasaPCER
