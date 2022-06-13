@@ -347,10 +347,12 @@ nodosTasas = np.arange(120) * 30 + 30
 
 # %% Simulo M veces la siguiente curva y generlo un array con todos los resultados
 
-M = 10
+M = 100
 LB = ["Activo", "Pasivo"]
 TS = ["ARS", "USD", "CER"]
-d = {"LugarBalance":["Activo","Activo","Activo","Pasivo","Pasivo","Pasivo"],"Moneda":["ARS","USD","CER","ARS","USD","CER"],"Grupo":["A","B","C","A","B","C"]}
+d = {"LugarBalance":["Activo","Activo","Activo","Pasivo","Pasivo","Pasivo"],
+     "Moneda":["ARS","USD","CER","ARS","USD","CER"],
+     "Grupo":["A","B","C","A","B","C"]}
 correlaciones = pd.DataFrame(d)
 
 ValoresActuales,Simulaciones = loopActualiza(Caidas, tasasInput, nodosTasas, M, correlaciones)
