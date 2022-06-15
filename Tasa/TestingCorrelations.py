@@ -93,7 +93,7 @@ def simulacionCurva(dfDiferencia, ultimaCurva, cholesky, M=1000, arrayShockIndep
 
         arrayShockIndependiente = dfRandom.values                               ### Guardo el array de shocks independientes
 
-        for i in tqdm(range(M)):                                                      ### ciclo a travez de todas las simulaciones
+        for i in tqdm(range(M)):                                                ### ciclo a travez de todas las simulaciones
             shockIndep = arrayShockIndependiente[i]                             ### tomo el shock aleatorio independiente de la simulacion
             shockCorr = np.array(shockCorrelacionado(shockIndep, cholesky))     ### uso la funcion shockCorrelacionado para correlacionar los shocks
             curvaSimulada = np.add(ultimaCurva, shockCorr)                      ### sumo la curva de shocks correlacionados a la ultima curva
@@ -168,23 +168,38 @@ def interpolaTasas(dfSimulaciones, nodosTasas):
 # %% Funciones que actualizan las caidas por sus respectivas tasas.
 
 
-def ValorActualiza(Caidas, Tasas, LugarBalance, Moneda, M=1000):
-
-    Actualizados = actualizaSimulaciones(Caidas.fillna(0)[(Caidas["Moneda"] == Moneda) & 
-                                                          (Caidas["LugarBalance"] == LugarBalance)].values[:, 4:], 
-                                         Tasas.values, M)
+def ValorActualiza(Caidas, Tasas, M=1000):
+    """Actualiza las caidas utilizando las M cuva de tasas simuladas.
+    
+    Parametros
+        ----------
+        Caidas : DataFrame
+            Contiene  todas las caidas de activos y pasivos con intereses ya calculados.
+        Tasas : DataFrame
+            Contiene todas las curvas de tasas simuladas para la tasa que esta siendo operada.
+        M : Integer
+            Es el numero de simulaciones que se estan ejecutando.
+    """
+    
+    Actualizados = []
+    
+    for i in tqdm(range(M)):
+        Actualizados.append(actualizaCaida(Caidas.sum(axis=0), Tasas.values[i]))
 
     return Actualizados
 
 
-def actualizaSimulaciones(arrayCaidas, arrayTasas, M=1000):
-    Resultados = []
-    for i in tqdm(range(M)):
-        Resultados.append(actualizaCaida(arrayCaidas.sum(axis=0), arrayTasas[i]))
-    return Resultados
-
-
 def actualizaCaida(Caida, Tasas):
+    """Actualiza las caidas utilizando las M cuva de tasas simuladas.
+    
+    Parametros
+        ----------
+        Caidas : DataFrame
+            Contiene  todas las caidas ya filtradas de activos y pasivos 
+            con intereses ya calculados.
+        Tasas : DataFrame
+            Contiene una curva simulada de la tasa que esta siendo operada.
+    """
     ValorActual = 0
     for i in range(len(Tasas)):
         if Caida[i] != 0:
@@ -194,7 +209,23 @@ def actualizaCaida(Caida, Tasas):
 # %% Funcion que actualiza las distintas aperturas de caidas
 
 
-def loopActualiza(Caidas, tasasInput, nodosTasas, M, correlaciones):
+def loopActualiza(Caidas, tasasInput, nodosTasas, correlaciones, M = 1000):
+    """Actualiza las caidas utilizando las M cuva de tasas simuladas.
+    
+    Parametros
+        ----------
+        Caidas : DataFrame
+            Contiene  todas las caidas de activos y pasivos con intereses ya calculados.
+        tasasInput : DataFrame
+            Contiene todas las curvas de todas las tasas.
+        nodosTasas : Array of int32
+            Es la secuencia que contiene todos los nodos de tasas (cada 30 días por 10 años).
+        correlaciones : DataFrame
+            Es la tabla que informa que tasas estan correlacionadas.
+        M : Integer
+            Es el numero de simulaciones que se van a ejecutar.
+            Esta seteada por default en 1.000 simulaciones
+    """
 
     ValorActual = {}
     dicSimulacionesCorr = {}
@@ -216,9 +247,8 @@ Comienza proceso para la tasa {LugarBalance} {Moneda}""")
             if dfCovarianza.isnull().any().any():
                 print("La matriz de covarianza tiene valores nulos")
                 raise SystemExit()
-                
             Grupo = str(correlaciones.loc[(correlaciones["LugarBalance"] == LugarBalance) & 
-                                  (correlaciones["Moneda"] == Moneda)].values[:,-1][0])
+                                          (correlaciones["Moneda"] == Moneda)].values[:,-1][0])
             
             print("Simulo Tasa")
             
@@ -256,7 +286,10 @@ Comienza proceso para la tasa {LugarBalance} {Moneda}""")
                 
             print("Actualizo Caidas")
             ValorActual_assist[Moneda] = ValorActualiza(
-                Caidas, Tasas, LugarBalance, Moneda, M)
+                Caidas.fillna(0)[(Caidas["Moneda"] == Moneda) & 
+                                 (Caidas["LugarBalance"] == LugarBalance)].values[:, 4:], 
+                Tasas,
+                M)
             
         ValorActual[LugarBalance] = ValorActual_assist
     return ValorActual, dicSimulacionesCorr
@@ -327,15 +360,15 @@ nodosTasas = np.arange(120) * 30 + 30
 
 # %% Simulo M veces la siguiente curva y generlo un array con todos los resultados
 
-M = 100000
+M = 1000000
 LB = ["Activo", "Pasivo"]
 TS = ["ARS", "USD", "CER"]
 d = {"LugarBalance":["Activo","Activo","Activo","Pasivo","Pasivo","Pasivo"],
      "Moneda":["ARS","USD","CER","ARS","USD","CER"],
-     "Grupo":["A","B","C","A","B","C"]}
+     "Grupo":["A","B","C","A","D","C"]}
 correlaciones = pd.DataFrame(d)
 
-ValoresActuales,Simulaciones = loopActualiza(Caidas, tasasInput, nodosTasas, M, correlaciones)
+ValoresActuales,Simulaciones = loopActualiza(Caidas, tasasInput, nodosTasas, correlaciones, M)
 print("==============================")
 CapitalEconomico = calculaCE(ValoresActuales)
 
