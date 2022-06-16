@@ -229,9 +229,9 @@ def loopActualiza(Caidas, tasasInput, nodosTasas, correlaciones, M = 1000):
 
     ValorActual = {}
     dicSimulacionesCorr = {}
-    
+    sims = {}
     for LugarBalance in LB:
-
+        sims_assist = {}
         ValorActual_assist = {}
         for Moneda in TS:
             print(f"""==============================
@@ -279,7 +279,7 @@ Comienza proceso para la tasa {LugarBalance} {Moneda}""")
                 
             print("Interpolo Tasas")
             Tasas = interpolaTasas(dfSimulaciones, nodosTasas)
-            
+            sims_assist[Moneda] = Tasas
             if Tasas.isnull().any().any():
                 print("El DataFrame de tasas interpoladas contiene valores nulos")
                 raise SystemExit()
@@ -292,18 +292,48 @@ Comienza proceso para la tasa {LugarBalance} {Moneda}""")
                 M)
             
         ValorActual[LugarBalance] = ValorActual_assist
-    return ValorActual, dicSimulacionesCorr
+        sims[LugarBalance] = sims_assist
+    return ValorActual, dicSimulacionesCorr, sims
 
 
-def calculaCE(ValoresActuales):
-    CE = {}
+def neteoAP(ValoresActuales,TS, cotizaUSD):
+    CE = pd.DataFrame(columns=TS)
     for i in TS:
-        Activo = ValoresActuales["Activo"][i]
-        Pasivo = ValoresActuales["Pasivo"][i]
-        diferencia = [e1 - e2 for e1, e2 in zip(Activo, Pasivo)]
-        CE[i] = (np.mean(diferencia) - np.percentile(diferencia, 0.1))
+        if i == "USD":
+            Activo = (np.array(ValoresActuales["Activo"][i]) * cotizaUSD).tolist()
+            Pasivo = (np.array(ValoresActuales["Pasivo"][i]) * cotizaUSD).tolist()
+        else:
+            Activo = ValoresActuales["Activo"][i]
+            Pasivo = ValoresActuales["Pasivo"][i]
+        
+        Neto = [e1 - e2 for e1, e2 in zip(Activo, Pasivo)]
+        CE.assign(i = Neto)
+        CE[i] = Neto
     return CE
 
+
+def Capitales(netos, TS):
+    
+    netos["Total"] = 0
+    
+    for i in TS:
+        netos["Total"] += netos[i]
+    
+    Media = np.quantile(netos["Total"],0.5)
+    
+    Percentil999 = np.quantile(netos["Total"],0.001)
+    Percentil995 = np.quantile(netos["Total"],0.005)
+    Percentil99 = np.quantile(netos["Total"],0.01)
+    
+    CapitalEconomico999 = Media - Percentil999
+    CapitalEconomico995 = Media - Percentil995
+    CapitalEconomico99 = Media - Percentil99
+    
+    CapitalEconomico = {"CE 99.9" : CapitalEconomico999*1000,
+                        "CE 99.5" : CapitalEconomico995*1000,
+                        "CE 99.0" : CapitalEconomico99*1000}
+    
+    return CapitalEconomico
 
 # %% Inputs del modelo
 
@@ -341,7 +371,6 @@ tasasInput = pd.concat(frames)
 tasasInput.columns = ["Fecha", 30, 60, 90, 120, 150, 180, 270, 360, 450, 540, 720, 900,
                       1080, 1260, 1440, 1620, 1800, 2160, 2520, 2880, 3240, 3600, "LugarBalance", "Moneda"]
 
-
 tasasInput.drop([2520, 2880, 3240], axis=1, inplace=True)
 
 for nodo in tasasInput:
@@ -350,8 +379,8 @@ for nodo in tasasInput:
     else:
         tasasInput[nodo] = tasasInput[nodo] / 100
 
-
 end = time.time()
+
 print(
     f'el codigo tarda {end - start:.2f} segundos en realizar el input de tasas y caidas')
 start = time.time()
@@ -360,22 +389,31 @@ nodosTasas = np.arange(120) * 30 + 30
 
 # %% Simulo M veces la siguiente curva y generlo un array con todos los resultados
 
-M = 1000000
-LB = ["Activo", "Pasivo"]
-TS = ["ARS", "USD", "CER"]
+M = 100000
+LB = pd.unique(Caidas["LugarBalance"])
+TS = pd.unique(Caidas["Moneda"])
 d = {"LugarBalance":["Activo","Activo","Activo","Pasivo","Pasivo","Pasivo"],
      "Moneda":["ARS","USD","CER","ARS","USD","CER"],
      "Grupo":["A","B","C","A","D","C"]}
 correlaciones = pd.DataFrame(d)
 
-ValoresActuales,Simulaciones = loopActualiza(Caidas, tasasInput, nodosTasas, correlaciones, M)
+ValoresActuales,ShocksAleatorios,SimulacionesTasas = loopActualiza(Caidas, tasasInput, nodosTasas, correlaciones, M)
+
+print()
 print("==============================")
-CapitalEconomico = calculaCE(ValoresActuales)
 
+cotizaUSD = 110
 
+neto = neteoAP(ValoresActuales, TS, cotizaUSD)
+
+CapitalEcon = Capitales(neto,TS)
+
+    
 # %% Time report
 
 end = time.time()
 print(
-    f'el codigo tarda {end - start:.2f} segundos en correr {M} simulaciones para todas las tasas')
-del start, end, M, frames, nodosTasas, tasaAFTP, tasaAUSD, tasaACER, tasaPFTP, tasaPUSD, tasaPCER
+    f'el codigo tarda {(end - start)/60:.2f} minutos en correr {M} simulaciones para todas las tasas')
+#del start, end, nodo, frames, nodosTasas, 
+#tasaAFTP, tasaAUSD, tasaACER, tasaPFTP, 
+#tasaPUSD, tasaPCER, neto
