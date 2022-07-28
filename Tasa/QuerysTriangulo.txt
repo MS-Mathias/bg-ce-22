@@ -1,0 +1,95 @@
+sel
+sav_dly_bal_date as fecha,
+case when (acredita_haberes_fl = 1 and mis_elemento_desc3 not in ('Banca Mayorista')) then 'CA trans' 
+           when (acredita_haberes_fl = 0  and mis_elemento_desc3 not in ('Banca Mayorista')) then 'CA no trans' 
+        else 'CA no Mesa' end as segmento,       
+sum (sav_dly_sld_acr) / 1000000 as saldo
+from p_dw_explo.sav_dly as ca
+left join p_dw_explo.sav_gen as gen
+on ca.acct_nbr  = gen.acct_nbr and ca.acct_subsystem_id = gen.acct_subsystem_id
+left join p_lk_explo.tva_arbol_segmento as seg 
+on seg_code = seg.segment_id
+left join p_lk_explo.producto_arbol as prod
+on gen.prod_id = prod.prod_id
+left join p_dw_explo.ms_cliente as hab
+on hab.party_id = gen.party_id
+inner join (sel fecha_sla from p_dw_explo.calendario_servicios where ultimo_dia_habil_mes = 'Y' ) cal
+on ca.sav_dly_bal_date = cal.fecha_sla
+where mis_elemento_desc6 not in ('institucionales' ,'Corporativas', 'Corporativa') 
+having saldo > 0
+group by 1,2
+
+sel
+chk_dly_bal_date as fecha,
+--case when  mis_elemento_desc3 = 'Banca Minorista'  then 'CC mino'  
+        --else 'CC mayo' end as segmento,   
+--case when  codigo_tipo_persona = 'F'  then 'CC mino'  
+  --      else 'CC mayo' end as segmento,  
+case when  ((codigo_tipo_persona = 'F' and mis_elemento_desc3 = 'Banca Minorista' )or ( flag_marca_mypyme = 1 and mis_elemento_desc3 = 'Banca Minorista')) then 'CC mino'  
+        else 'CC mayo' end as segmento,  
+sum (chk_dly_sld_acr) / 1000000 as saldo
+from p_dw_explo.chk_dly as ca
+left join p_dw_explo.chk_gen as gen
+on ca.acct_nbr  = gen.acct_nbr and ca.acct_subsystem_id = gen.acct_subsystem_id
+left join p_lk_explo.tva_arbol_segmento as seg 
+on seg_code = seg.segment_id
+left join p_lk_explo.producto_arbol as prod
+on gen.prod_id = prod.prod_id
+left join p_dw_explo.ms_cliente as hab
+on hab.party_id = gen.party_id
+left join p_dw_explo.cliente_datos datos
+on gen.party_id = datos.party_id
+left join p_dw_explo.party_mipyme as pyme 
+on gen.party_id = pyme.party_id 
+inner join (sel fecha_sla from p_dw_explo.calendario_servicios where ultimo_dia_habil_mes = 'Y' ) cal
+on ca.chk_dly_bal_date = cal.fecha_sla
+having saldo > 0
+group by 1,2
+
+sel
+sav_mth_year as anio,
+sav_mth_month as mes,
+case when (acredita_haberes_fl = 1 and mis_elemento_desc3 not in ('Banca Mayorista')) then 'CA trans' 
+           when (acredita_haberes_fl = 0  and mis_elemento_desc3 not in ('Banca Mayorista')) then 'CA no trans' 
+        else 'CA no Mesa' end as segmento,       
+sum (sav_mth_sld_acr) / 1000000 as saldo
+from p_dw_explo.sav_mth as ca
+left join p_dw_explo.sav_gen as gen
+on ca.acct_nbr  = gen.acct_nbr and ca.acct_subsystem_id = gen.acct_subsystem_id
+left join p_lk_explo.tva_arbol_segmento as seg 
+on seg_code = seg.segment_id
+left join p_lk_explo.producto_arbol as prod
+on gen.prod_id = prod.prod_id
+left join p_dw_explo.ms_cliente as hab
+on hab.party_id = gen.party_id
+where mis_elemento_desc6 not in ('institucionales' ,'Corporativas', 'Corporativa') and (anio between 2016 and 2019)
+having saldo > 0
+group by 1,2,3
+order by 1 desc, 2 desc
+
+sel
+chk_mth_year as anio,
+chk_mth_month as mes,
+case when  ((codigo_tipo_persona = 'F' and mis_elemento_desc3 = 'Banca Minorista' )or ( flag_marca_mypyme = 1 and mis_elemento_desc3 = 'Banca Minorista')) then 'CC mino'  
+        else 'CC mayo' end as segmento,  
+sum (chk_mth_sld_acr) / 1000000 as saldo
+from p_dw_explo.chk_mth as ca
+left join p_dw_explo.chk_gen as gen
+on ca.acct_nbr  = gen.acct_nbr and ca.acct_subsystem_id = gen.acct_subsystem_id
+left join p_lk_explo.tva_arbol_segmento as seg 
+on seg_code = seg.segment_id
+left join p_lk_explo.producto_arbol as prod
+on gen.prod_id = prod.prod_id
+left join p_dw_explo.ms_cliente as hab
+on hab.party_id = gen.party_id
+left join p_dw_explo.cliente_datos datos
+on gen.party_id = datos.party_id
+left join p_dw_explo.party_mipyme as pyme 
+on gen.party_id = pyme.party_id 
+where anio between 2016 and 2019
+having saldo > 0
+group by 1,2,3
+order by 1 desc, 2 desc
+
+sel indicador_macro_fc, indicador_macro_vl from p_dw_explo.Indicadores_macroeconomicos
+where indicador_macro_vl is not null and indicador_macro_cd = 'IPC'

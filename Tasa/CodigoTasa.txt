@@ -5,6 +5,10 @@ import numpy as np
 import pandas as pd 
 import time
 from tqdm import tqdm
+import re
+import os
+import time
+from datetime import datetime
 
 start = time.time()
 
@@ -27,12 +31,11 @@ def parametrosSimulaciones(tasasInput, LugarBalance, Moneda):
             Puede ser ARS, USD o CER.
     """
     
-    dfDiferencia = DiferenciaNodos(tasasInput.loc[(tasasInput["Lugar del balance"] == LugarBalance) &
+    dfDiferencia = DiferenciaNodos(tasasInput.loc[(tasasInput["LugarBalance"] == LugarBalance) &
                                                   (tasasInput["Moneda"] == Moneda),
                                                   tasasInput.columns.values.tolist()[1:len(tasasInput.columns)-2]])
 
     dfCovarianza = dfDiferencia.cov()
-
     
     cholesky = np.linalg.cholesky(dfCovarianza) 
 
@@ -194,7 +197,7 @@ def ValorActualiza(Caidas, Tasas, M=1000):
 
 
 def actualizaCaida(Caida, Tasas):
-    """Actualiza las caidas utilizando las M cuva de tasas simuladas.
+    """Actualiza las caidas utilizando las M cuvas de tasas simuladas.
     
     Parametros
         ----------
@@ -219,7 +222,7 @@ def loopActualiza(Caidas, tasasInput, nodosTasas, correlaciones, M = 1000):
     Parametros
         ----------
         Caidas : DataFrame
-            Contiene  todas las caidas de activos y pasivos con intereses ya calculados.
+            Contiene todas las caidas de activos y pasivos con intereses ya calculados.
         tasasInput : DataFrame
             Contiene todas las curvas de todas las tasas.
         nodosTasas : Array of int32
@@ -230,7 +233,7 @@ def loopActualiza(Caidas, tasasInput, nodosTasas, correlaciones, M = 1000):
             Es el numero de simulaciones que se van a ejecutar.
             Esta seteada por default en 1.000 simulaciones
     """
-
+    
     ValorActual = {}
     dicSimulacionesCorr = {}
     sims = {}
@@ -240,6 +243,7 @@ def loopActualiza(Caidas, tasasInput, nodosTasas, correlaciones, M = 1000):
         for Moneda in TS:
             print(f"""==============================
 Comienza proceso para la tasa {LugarBalance} {Moneda}""")
+            
             
             
             dfDiferencia, dfCovarianza, cholesky = parametrosSimulaciones(
@@ -253,14 +257,14 @@ Comienza proceso para la tasa {LugarBalance} {Moneda}""")
                 print("La matriz de covarianza tiene valores nulos")
                 raise SystemExit()
                 
-            Grupo = str(correlaciones.loc[(correlaciones["Lugar del balance"] == LugarBalance) & 
+            Grupo = str(correlaciones.loc[(correlaciones["LugarBalance"] == LugarBalance) & 
                                           (correlaciones["Moneda"] == Moneda)].values[:,-1][0])
             
             print("Simulo Tasa")
             
             if not(Grupo in dicSimulacionesCorr):
                 arrayTasasSimuladas, arrayShockInependiente = simulacionCurva(dfDiferencia,
-                                                                              tasasInput.loc[(tasasInput["Lugar del balance"] == LugarBalance) &
+                                                                              tasasInput.loc[(tasasInput["LugarBalance"] == LugarBalance) &
                                                                                              (tasasInput["Moneda"] == Moneda),
                                                                                              tasasInput.columns.values.tolist()[1:len(tasasInput.columns)-2]].iloc[-1],
                                                                               cholesky,
@@ -269,14 +273,15 @@ Comienza proceso para la tasa {LugarBalance} {Moneda}""")
             
             else:
                 arrayTasasSimuladas, arrayShockInependiente = simulacionCurva(dfDiferencia,
-                                                                              tasasInput.loc[(tasasInput["Lugar del balance"] == LugarBalance) &
+                                                                              tasasInput.loc[(tasasInput["LugarBalance"] == LugarBalance) &
                                                                                              (tasasInput["Moneda"] == Moneda),
                                                                                              tasasInput.columns.values.tolist()[1:len(tasasInput.columns)-2]].iloc[-1],
                                                                               cholesky,
                                                                               M,
                                                                               dicSimulacionesCorr[Grupo])
-            
-            dfSimulaciones = pd.DataFrame(arrayTasasSimuladas, columns=dfDiferencia.columns)
+                
+            dfSimulaciones = pd.DataFrame(arrayTasasSimuladas,
+                                              columns=dfDiferencia.columns)
             
             if dfSimulaciones.isnull().any().any():
                 print("El DataFrame de Simulaciones de tasas contiene valores nulos")
@@ -296,7 +301,7 @@ Comienza proceso para la tasa {LugarBalance} {Moneda}""")
             
             ValorActual_assist[Moneda] = ValorActualiza(
                 Caidas.fillna(0)[(Caidas["Moneda"] == Moneda) & 
-                                 (Caidas["Lugar del balance"] == LugarBalance)].values[:,4:], 
+                                 (Caidas["LugarBalance"] == LugarBalance)].values[:,4:], 
                 Tasas,
                 M)
             
@@ -309,11 +314,11 @@ def neteoAP(ValoresActuales,TS, cotizaUSD):
     CE = pd.DataFrame(columns=TS)
     for i in TS:
         if i == "USD":
-            Activo = (np.array(ValoresActuales["Activo"][i]) * cotizaUSD).tolist()
-            Pasivo = (np.array(ValoresActuales["Pasivo"][i]) * cotizaUSD).tolist()
+            Activo = (np.array(ValoresActuales["Activa"][i]) * cotizaUSD).tolist()
+            Pasivo = (np.array(ValoresActuales["Pasiva"][i]) * cotizaUSD).tolist()
         else:
-            Activo = ValoresActuales["Activo"][i]
-            Pasivo = ValoresActuales["Pasivo"][i]
+            Activo = ValoresActuales["Activa"][i]
+            Pasivo = ValoresActuales["Pasiva"][i]
         
         Neto = [e1 - e2 for e1, e2 in zip(Activo, Pasivo)]
         CE.assign(i = Neto)
@@ -566,15 +571,15 @@ print(f'el codigo tarda {end - start:.2f} segundos en definir las funciones')
 start = time.time()
 
 Caidas = pd.read_excel(
-    "Caidas V3.xlsx")
+    "Caidas tasa.xlsx")
 
 tasasInput.columns = ["Fecha", 30, 60, 90, 120, 150, 180, 270, 360, 450, 540, 720, 900,
-                      1080, 1260, 1440, 1620, 1800, 2160, 2520, 2880, 3240, 3600, "Lugar del balance", "Moneda"]
+                      1080, 1260, 1440, 1620, 1800, 2160, 2520, 2880, 3240, 3600, "LugarBalance", "Moneda"]
 
 tasasInput.drop([2160, 2520, 2880, 3240], axis=1, inplace=True)
 
 for nodo in tasasInput:
-    if nodo == "Fecha" or nodo == "Lugar del balance" or nodo == "Moneda":
+    if nodo == "Fecha" or nodo == "LugarBalance" or nodo == "Moneda":
         continue
     else:
         tasasInput[nodo] = tasasInput[nodo] / 100
@@ -589,15 +594,15 @@ start = time.time()
 
 nodosTasas = np.arange(120) * 30 + 30
 M = 1000
-LB = pd.unique(Caidas["Lugar del balance"])
+LB = pd.unique(Caidas["LugarBalance"])
 TS = pd.unique(Caidas["Moneda"])
-d = {"Lugar del balance":["Activo","Activo","Activo","Pasivo","Pasivo","Pasivo"],
-     "Moneda":["ARS","USD","CER","ARS","USD","CER"],
+d = {"LugarBalance":["Activa","Activa","Activa","Pasiva","Pasiva","Pasiva"],
+     "Moneda":["Pesos","Dolares","Uva","Pesos","Dolares","Uva"],
      "Grupo":["A","B","C","A","D","C"]}
 correlaciones = pd.DataFrame(d)
 
 ValoresActuales,ShocksAleatorios,SimulacionesTasas = loopActualiza(Caidas, tasasInput, nodosTasas, correlaciones, M)
-Caidas[30].max()
+
 print()
 print("==============================")
 
@@ -613,5 +618,3 @@ CapitalEcon = Capitales(neto,TS)
 end = time.time()
 print(
     f'el codigo tarda {(end - start)/60:.2f} minutos en correr {M} simulaciones para todas las tasas')
-
-del start, end, nodo

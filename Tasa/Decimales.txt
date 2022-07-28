@@ -1,0 +1,3 @@
+CapitalEconomico = {"CE 99.9" : "{:0,.2f}".format(float(CapitalEconomico999*1000)),
+                        "CE 99.5" : "{:0,.2f}".format(float(CapitalEconomico995*1000)),
+                        "CE 99.0" : "{:0,.2f}".format(float(CapitalEconomico99*1000))}

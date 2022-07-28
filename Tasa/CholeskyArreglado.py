@@ -8,38 +8,28 @@ from tqdm import tqdm
 
 start = time.time()
 
-# %% Funciones para las Simulacion de Tasas de Interes
+# %% Funciones para definir parametros de las Simulacion de Tasas de Interes
 
-
-def parametrosSimulaciones(tasasInput, LugarBalance, Moneda):
+def parametrosSimulaciones(dfDiferencia):
     """Genera tres DataFrames con los parametros necesarios para realizar las simulaciones.
     Calcula la matriz de diferencias de tasas, la matriz de covarianza y la matriz de Cholesky.
     
     Parametros
         ----------
-        tasasInput : DataFrame
-            Serie historica de las curvas de tasas con todos sus nodos.
-        LugarBalance : String
-            Nombre del lugar del balance al que pertenecen las tasas que se van a utilizar.
-            Puede ser Activo o Pasivo.
-        Moneda : String
-            Codigo de la tasa que se va a utilizar.
-            Puede ser ARS, USD o CER.
+        dfDiferencia : DataFrame
+            Serie historica de las variaciones curvas de tasas.
     """
-    
-    dfDiferencia = DiferenciaNodos(tasasInput.loc[(tasasInput["Lugar del balance"] == LugarBalance) &
-                                                  (tasasInput["Moneda"] == Moneda),
-                                                  tasasInput.columns.values.tolist()[1:len(tasasInput.columns)-2]])
+    try:
+        dfCovarianza = dfDiferencia.cov()
+        cholesky = np.linalg.cholesky(dfCovarianza)
+    except:
+        dfDiferencia.drop(dfDiferencia.columns[-2],axis=1,inplace=True)
+        dfCovarianza, cholesky = parametrosSimulaciones(dfDiferencia)
 
-    dfCovarianza = dfDiferencia.cov()
-
-    
-    cholesky = np.linalg.cholesky(dfCovarianza) 
-
-    return dfDiferencia, dfCovarianza, cholesky
+    return dfCovarianza, cholesky
 
 
-def DiferenciaNodos(tasasInput):
+def DiferenciaNodos(df0):
     """Genera un DataFrame con las diferencias entre las tasas de cada periodo y las de 90 dias antes.
     
     Parametros
@@ -48,14 +38,12 @@ def DiferenciaNodos(tasasInput):
             Serie historica de las curvas de tasas con todos sus nodos.
     """
     
-    df1 = tasasInput.copy() 
+    df1 = df0.copy() 
     for nodo in df1:
         if type(nodo) != int:
             continue
-        elif nodo > 90:
-            df1[nodo] = df1[nodo].diff(90)
         else:
-            df1[nodo] = df1[nodo].diff(nodo)
+            df1[nodo] = df1[nodo].diff(30)
     return df1
 
 # %% Funciones que simulan las curvas y las interpola
@@ -79,6 +67,9 @@ def simulacionCurva(dfDiferencia, ultimaCurva, cholesky, M=1000, arrayShockIndep
     avg = {}
     std = {}
     nodosAsist = ultimaCurva.index
+    nodosindex = []
+    for i in range(len(nodosAsist)):
+        nodosindex.append(nodosAsist[i]//30-1)
     
     for nodo in dfDiferencia:                                                   ### ciclo todos los nodos
         avg[nodo] = dfDiferencia[nodo].mean()                                   ### calculo el promedio del nodo
@@ -88,9 +79,13 @@ def simulacionCurva(dfDiferencia, ultimaCurva, cholesky, M=1000, arrayShockIndep
 
         arraySimulaciones = np.zeros(shape=(M, len(ultimaCurva)))               ### Genero Array para almacenar las simulaciones
 
-        arrayRandom = np.random.rand(M,len(ultimaCurva))                        ### Genero array de valores aleatorios
-        dfRandom = pd.DataFrame(arrayRandom,columns = nodosAsist)               ### paso el array a un df de pandas para operar por nodos
-
+        arrayRandom = np.random.rand(M,120)                                     ### Genero array de valores aleatorios
+        
+        dfRandom = pd.DataFrame(arrayRandom)                                    ### paso el array a un df de pandas para operar por nodos
+        
+        dfRandom = dfRandom.drop(columns=[col for col in dfRandom if col not in nodosindex])
+        dfRandom.columns = nodosAsist
+        
         for nodo in dfRandom:                                                   ### ciclo todos los nodos
             dfRandom[nodo] = ((dfDiferencia[nodo].quantile(
                 dfRandom[nodo]) - avg[nodo]) / std[nodo]).values                ### tomo el percentil y lo estandarizo
@@ -105,6 +100,18 @@ def simulacionCurva(dfDiferencia, ultimaCurva, cholesky, M=1000, arrayShockIndep
 
     else:                                                                       ### aca se realiza el mismo proceso de antes, tomando los shocks aleatorios de una tasa ya simulada y correlacionada
         arraySimulaciones = np.zeros(shape=(M, len(ultimaCurva)))
+        arrayRandom = arrayShockIndependiente                                  ### Genero array de valores aleatorios
+        
+        dfRandom = pd.DataFrame(arrayRandom)                                    ### paso el array a un df de pandas para operar por nodos
+        
+        dfRandom = dfRandom.drop(columns=[col for col in dfRandom if col not in nodosindex])
+        dfRandom.columns = nodosAsist
+        
+        for nodo in dfRandom:                                                   ### ciclo todos los nodos
+            dfRandom[nodo] = ((dfDiferencia[nodo].quantile(
+                dfRandom[nodo]) - avg[nodo]) / std[nodo]).values                ### tomo el percentil y lo estandarizo
+
+        arrayShockIndependiente = dfRandom.values   
         for i in tqdm(range(M)):
             shockIndep = arrayShockIndependiente[i]
             shockCorr = np.array(shockCorrelacionado(shockIndep, cholesky))
@@ -112,7 +119,7 @@ def simulacionCurva(dfDiferencia, ultimaCurva, cholesky, M=1000, arrayShockIndep
             arraySimulaciones[i] = curvaSimulada
             arrayShockIndependiente = arrayShockIndependiente
             
-    return arraySimulaciones, arrayShockIndependiente
+    return arraySimulaciones, arrayRandom
 
 
 def shockCorrelacionado(shockIndependiente, cholesky):
@@ -172,7 +179,7 @@ def interpolaTasas(dfSimulaciones, nodosTasas):
 # %% Funciones que actualizan las caidas por sus respectivas tasas.
 
 
-def ValorActualiza(Caidas, Tasas, M=1000):
+def ValorActualiza(df, Tasas, M=1000):
     """Actualiza las caidas utilizando las M cuva de tasas simuladas.
     
     Parametros
@@ -188,13 +195,13 @@ def ValorActualiza(Caidas, Tasas, M=1000):
     Actualizados = []
     
     for i in tqdm(range(M)):
-        Actualizados.append(actualizaCaida(Caidas.sum(axis=0), Tasas.values[i]))
+        Actualizados.append(actualizaCaida(df.sum(axis=0), Tasas.values[i]))
 
     return Actualizados
 
 
-def actualizaCaida(Caida, Tasas):
-    """Actualiza las caidas utilizando las M cuva de tasas simuladas.
+def actualizaCaida(df1, Tasas):
+    """Actualiza las caidas utilizando las M cuvas de tasas simuladas.
     
     Parametros
         ----------
@@ -206,8 +213,8 @@ def actualizaCaida(Caida, Tasas):
     """
     ValorActual = 0
     for i in range(len(Tasas)):
-        if Caida[i] != 0:
-            ValorActual += Caida[i] / (1+Tasas[i]) ** ((i*30+30) / 360)
+        if df1[i] != 0:
+            ValorActual += df1[i] / (1+Tasas[i]) ** ((i*30+30) / 360)
     return ValorActual
 
 # %% Funcion que actualiza las distintas aperturas de caidas
@@ -219,7 +226,7 @@ def loopActualiza(Caidas, tasasInput, nodosTasas, correlaciones, M = 1000):
     Parametros
         ----------
         Caidas : DataFrame
-            Contiene  todas las caidas de activos y pasivos con intereses ya calculados.
+            Contiene todas las caidas de activos y pasivos con intereses ya calculados.
         tasasInput : DataFrame
             Contiene todas las curvas de todas las tasas.
         nodosTasas : Array of int32
@@ -230,7 +237,7 @@ def loopActualiza(Caidas, tasasInput, nodosTasas, correlaciones, M = 1000):
             Es el numero de simulaciones que se van a ejecutar.
             Esta seteada por default en 1.000 simulaciones
     """
-
+    
     ValorActual = {}
     dicSimulacionesCorr = {}
     sims = {}
@@ -242,8 +249,15 @@ def loopActualiza(Caidas, tasasInput, nodosTasas, correlaciones, M = 1000):
 Comienza proceso para la tasa {LugarBalance} {Moneda}""")
             
             
-            dfDiferencia, dfCovarianza, cholesky = parametrosSimulaciones(
-                tasasInput, LugarBalance, Moneda)
+            dfDiferencia = DiferenciaNodos(tasasInput.loc[(tasasInput['Lugar del balance'] == LugarBalance) &
+                                                          (tasasInput["Moneda"] == Moneda),
+                                                          tasasInput.columns.values.tolist()[1:len(tasasInput.columns)-2]])
+            
+            if (LugarBalance== "Activo") & (Moneda == "CER"):
+                dfDiferencia.drop([60,90,120],axis=1,inplace=True)
+            
+            dfCovarianza, cholesky = parametrosSimulaciones(dfDiferencia)
+            
             
             if dfDiferencia.iloc[360:].isnull().any().any():
                 print("El DataFrame de diferencias de tasas contiene valores nulos \n")
@@ -253,30 +267,30 @@ Comienza proceso para la tasa {LugarBalance} {Moneda}""")
                 print("La matriz de covarianza tiene valores nulos")
                 raise SystemExit()
                 
-            Grupo = str(correlaciones.loc[(correlaciones["Lugar del balance"] == LugarBalance) & 
+            Grupo = str(correlaciones.loc[(correlaciones['Lugar del balance'] == LugarBalance) & 
                                           (correlaciones["Moneda"] == Moneda)].values[:,-1][0])
             
+            ultimaCurva = tasasInput.loc[(tasasInput['Lugar del balance'] == LugarBalance) &
+                                         (tasasInput["Moneda"] == Moneda),
+                                         dfDiferencia.columns.values.tolist()].iloc[-1]
             print("Simulo Tasa")
             
             if not(Grupo in dicSimulacionesCorr):
                 arrayTasasSimuladas, arrayShockInependiente = simulacionCurva(dfDiferencia,
-                                                                              tasasInput.loc[(tasasInput["Lugar del balance"] == LugarBalance) &
-                                                                                             (tasasInput["Moneda"] == Moneda),
-                                                                                             tasasInput.columns.values.tolist()[1:len(tasasInput.columns)-2]].iloc[-1],
+                                                                              ultimaCurva,
                                                                               cholesky,
                                                                               M)
                 dicSimulacionesCorr[Grupo] = arrayShockInependiente
             
             else:
                 arrayTasasSimuladas, arrayShockInependiente = simulacionCurva(dfDiferencia,
-                                                                              tasasInput.loc[(tasasInput["Lugar del balance"] == LugarBalance) &
-                                                                                             (tasasInput["Moneda"] == Moneda),
-                                                                                             tasasInput.columns.values.tolist()[1:len(tasasInput.columns)-2]].iloc[-1],
+                                                                              ultimaCurva,
                                                                               cholesky,
                                                                               M,
                                                                               dicSimulacionesCorr[Grupo])
-            
-            dfSimulaciones = pd.DataFrame(arrayTasasSimuladas, columns=dfDiferencia.columns)
+                
+            dfSimulaciones = pd.DataFrame(arrayTasasSimuladas,
+                                              columns=dfDiferencia.columns)
             
             if dfSimulaciones.isnull().any().any():
                 print("El DataFrame de Simulaciones de tasas contiene valores nulos")
@@ -291,14 +305,11 @@ Comienza proceso para la tasa {LugarBalance} {Moneda}""")
                 print("El DataFrame de tasas interpoladas contiene valores nulos")
                 raise SystemExit()
             
-            
             print("Actualizo Caidas")
-            
-            ValorActual_assist[Moneda] = ValorActualiza(
-                Caidas.fillna(0)[(Caidas["Moneda"] == Moneda) & 
-                                 (Caidas["Lugar del balance"] == LugarBalance)].values[:,4:], 
-                Tasas,
-                M)
+            ValorActual_assist[Moneda] = ValorActualiza(Caidas.fillna(0).loc[(Caidas["Moneda"] == Moneda) & 
+                                                                         (Caidas['Lugar del balance'] == LugarBalance)].values[:,4:], 
+                                                        Tasas,
+                                                        M)
             
         ValorActual[LugarBalance] = ValorActual_assist
         sims[LugarBalance] = sims_assist
@@ -328,11 +339,20 @@ def Capitales(netos, TS):
     for i in TS:
         netos["Total"] += netos[i]
     
-    Media = np.quantile(netos["Total"],0.5)
+    Media = np.average(netos["Total"])
+    Mediana = np.quantile(netos["Total"],0.5)  
     
     Percentil999 = np.quantile(netos["Total"],0.001)
     Percentil995 = np.quantile(netos["Total"],0.005)
     Percentil99 = np.quantile(netos["Total"],0.01)
+    
+    netos["Media"] = Media
+    netos["Mediana"] = Mediana
+    netos["99.9%"] = Percentil999
+    netos["99.5%"] = Percentil995
+    netos["99.0%"] = Percentil99
+    
+    
     
     CapitalEconomico999 = Media - Percentil999
     CapitalEconomico995 = Media - Percentil995
@@ -344,219 +364,6 @@ def Capitales(netos, TS):
     
     return CapitalEconomico
 
-# %% Calculo Correlaciones de tasas
-
-
-
-# Obtengo la fecha de corrida la cual sirve para filtrar la informacion
-fecha_corrida = datetime.now()
-
-t0 = time.time()
- 
-
-def ImportoCurvas(fecha_min = '2010-01-01 00:00:00',fecha_max = fecha_corrida):
-    """Importa el archivo de Curvas historicas de tasa,
-        le realiza modificaciones al mismo:
-            ordena las filas por tipo de curva y fecha
-            elimino filas en caso de duplicados
-            fitlro las fechas
-        
-        Por ultimo, crea un archivo con la informacion importante de las curvas,
-        las cuales me van a servi para hacer los filtrados y generar los
-        distintos DF para cada curva.           
-    
-    Parametro
-        ----------
-        Archivos : list
-            Nombre de los 4 archivos input de caidas
-    """
-    
-    df = pd.read_excel('Curva Tasas Historicas.xlsx') ###Cargo el Archivo
-    tasasInput = df.copy()
-    df["Curva"] = df[['Lugar_balance', 'Moneda']].agg(' '.join, axis=1) ### creo una nueva columna como combinacion de dos
-    df.drop(['Lugar_balance', 'Moneda'], axis=1,inplace=True) ### dropeo las cols que no voy a usar
-    df.sort_values(by=['Curva','Fecha'],inplace=True)  ##ordeno las curvas por nombre de curva y despues por fecha
-    df.drop_duplicates(subset=['Fecha','Curva'],keep='first',inplace=True,ignore_index=True) ###elimino en caso de duplicados
-    
-    "Filtro fecha:"
-    
-    ####Filtrar en caso de cambiar la fecha
-    
-    df = df[(df['Fecha'] >= fecha_min ) & (df['Fecha'] <= fecha_max)]
-    df.reset_index(drop=True,inplace=True)
-
-
-    "Creo un nuevo archivo con los parametros de las curvas:"
-
-    df_data = pd.DataFrame(df['Curva'].drop_duplicates()) ###me quedo con las curvas unicas
-    df_data['Indices']=df_data.index ###Creo una columna con los valores de los indices
-    df_data.reset_index(drop=True,inplace=True)
-    
-    
-    
-    
-    return df, df_data, tasasInput
-
-
-# =============================================================================
-# Funcion diferencia
-# =============================================================================
-
-def Diferencia(df,cols=['Fecha','Curva'],dias=90):
-    
-    """calcula la diferencia de "n" dias del dataframe en cuestion, lo realiza para
-        cada columna numerica del df. Se setea en 90 dias ya que representa el holding period     
-                   
-    Parametros
-        ----------
-        df : DataFrame
-            
-    """
-    
-    df2=df.copy()
-    df2.drop(cols,inplace=True, axis=1)
-    df2=df2.diff(periods=dias,axis=0)
-    df2.dropna(axis=0,how='any',inplace=True)
-    df2.reset_index(drop=True,inplace=True)
-    
-    return df2
-
-# =============================================================================
-# Tests de correlacion
-# =============================================================================
-
-def Test_correlacion (df1,df2):
-    
-    """Realiza la prueba de correlaciones entre dos dataframes (Curvas).     
-                   
-    Parametros
-        ----------
-        df : DataFrame
-            
-    """
-    
-    corr = df1.corrwith(df2,axis=1)
-    total = corr.count()
-    positivo = corr[corr > 0.5].count()/total ##en porcentaje
-    negativo = corr[corr < -0.5].count()/total ###en porcentaje
-    neutro = corr[corr.between(-0.5,0.5)].count()/total
-    
-    
-    if positivo > 0.7:
-        
-        correlacion = 'positiva'
-        
-    elif negativo > 0.7:
-        
-        correlacion = 'negativa'    
-    
-    else:
-        
-        correlacion = 'no hay'
-        
-    return correlacion,positivo,neutro,negativo    
-        
-# =============================================================================
-# Separo los data frames
-# =============================================================================
-
-
-def Separo_DataFrames (df,df_data):
-    
-    dic_curvas={}
-    Indices=df_data['Indices']
-
-    for i,curva in zip(range(len(Indices)),df_data.Curva):
-        
-        try:
-            
-            dic_curvas[curva]=df.iloc[Indices[i]:(Indices[i+1]),:]
-            
-        except:
-            dic_curvas[curva] = df.iloc[Indices[i]:,:]
-            
-    return dic_curvas
-            
-# =============================================================================
-# Calculo de las correlaciones
-# =============================================================================
-
-def Calculo_correlaciones (diccionario_df):
-    
-    """Itera por cada Curva del diccionario y realiza todas las combinaciones posibles
-    para testear las correlaciones entre las mismas. Genera un DataFrame el cual
-    se indica si las curvas estan o no correlacionadas.     
-                   
-    Parametro
-        ----------
-        diccionario_Df : diccionario
-            contiene todas las curvas, donde cada nombre de la llave dentro del
-            diccionario es el nombre de la curva correspondiente.
-    """
-    
-    dic_curvas = diccionario_df.copy()
-    
-    """Genero las listas donde voy almacendando los resultados de las correlaciones:"""
-    
-    sin_correlacion=[]
-    Curva1 = []
-    Curva2 = []
-    Correlacion = []
-    Positivo = []
-    Neutro = []
-    Negativo = []
-    lista_keys=list(dic_curvas.keys())
-    
-    """inicio el for loop donde voy a estar iterando entre los dataframes dentro del diccionario"""
-    
-    for j in range(len(dic_curvas)-1): 
-        
-        for i in range(j+1,len(dic_curvas)):
-            
-            df1 = dic_curvas[lista_keys[j]] ###agarro el dataframe 1
-            df2 = dic_curvas[lista_keys[i]] ### agarro el dataframe 2
-            
-            if len(df1)<=len(df2): ###necesito asegurarme que los dfs tienen el mismo largo            
-                
-                df2 = df2[df2['Fecha'].isin(df1['Fecha'])]
-            else:
-                df1 = df1[df1['Fecha'].isin(df2['Fecha'])]
-            
-            df1 = Diferencia(df1)  ### genero las diferencias dentro de cada df
-            df2 = Diferencia (df2) 
-            
-            """realizo la correlacion entre ambas curvas y almaceno sus resultados"""
-            
-            correlacion,positivo,neutro,negativo = Test_correlacion(df1,df2)
-            
-            Curva1.append(lista_keys[j])
-            Curva2.append(lista_keys[i])
-            Correlacion.append(correlacion)
-            Positivo.append(positivo)
-            Neutro.append(neutro)
-            Negativo.append(negativo)
-        
-    dic = {'Curva 1':Curva1, 'Curva 2': Curva2, 'Correlacion':Correlacion,
-           'Positivo': Positivo,'Neutro':Neutro,'Negativo':Negativo}
-
-    df = pd.DataFrame.from_dict(dic)
-
-    return df    
-        
-        
-# =============================================================================
-# Ejecucion del codigo
-# =============================================================================
-
-Curvas,info_curvas, tasasInput = ImportoCurvas()
-
-Dic_curvas = Separo_DataFrames(Curvas, info_curvas) 
-
-correlaciones = Calculo_correlaciones(Dic_curvas)
-
-t1 = time.time()
-
-
 
 # %% Inputs del modelo
 
@@ -565,13 +372,15 @@ end = time.time()
 print(f'el codigo tarda {end - start:.2f} segundos en definir las funciones')
 start = time.time()
 
-Caidas = pd.read_excel(
-    "Caidas V3.xlsx")
+Caidas = pd.read_excel("Caidas V3.xlsx")
+
+tasasInput = pd.read_excel('Curva Tasas Historicas.xlsx')
+
+tasasInput.Fecha = tasasInput.Fecha.apply(lambda x: x.date())
 
 tasasInput.columns = ["Fecha", 30, 60, 90, 120, 150, 180, 270, 360, 450, 540, 720, 900,
                       1080, 1260, 1440, 1620, 1800, 2160, 2520, 2880, 3240, 3600, "Lugar del balance", "Moneda"]
 
-tasasInput.drop([2160, 2520, 2880, 3240], axis=1, inplace=True)
 
 for nodo in tasasInput:
     if nodo == "Fecha" or nodo == "Lugar del balance" or nodo == "Moneda":
@@ -613,5 +422,3 @@ CapitalEcon = Capitales(neto,TS)
 end = time.time()
 print(
     f'el codigo tarda {(end - start)/60:.2f} minutos en correr {M} simulaciones para todas las tasas')
-
-del start, end, nodo

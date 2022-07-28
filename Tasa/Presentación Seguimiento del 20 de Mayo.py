@@ -52,7 +52,7 @@ def VasicekMultiSim(M, N, r0, lamda, media, sigma, dt = 1/252):
 
 ###############################################
 #Calibro los parametros de las simulaciones
-BADLAR = pd.read_excel("C:/Users/mathias.ezequiel.va1/Desktop/BADLAR.xlsx")
+BADLAR = pd.read_excel("BADLAR.xlsx")
 tasas_input = BADLAR['Valor'].values.tolist()
 for i in range(len(tasas_input)):
     tasas_input[i] = tasas_input[i]/100

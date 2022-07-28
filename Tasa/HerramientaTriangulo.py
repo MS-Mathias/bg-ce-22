@@ -3,7 +3,8 @@ import pandas as pd
 from tqdm import tqdm
 
 def importaTriangulo():
-
+    
+    
     Cuadro1 = pd.read_excel("TrianguloDatos.xlsx","Cuadro1")
     Cuadro2 = pd.read_excel("TrianguloDatos.xlsx","Cuadro2")
     Cuadro3 = pd.read_excel("TrianguloDatos.xlsx","Cuadro3")
@@ -38,22 +39,32 @@ def importaTriangulo():
                           how ='inner')
     
     
-    actualizado["ipc_actual"] = max(actualizado.loc[actualizado["fecha"] == max(actualizado["fecha"]),"indicador_macro_vl"])
+    actualizado["ipc_base"] = 100
     
-    actualizado["MontoActualizado"] = actualizado["saldo"] * actualizado["indicador_macro_vl"] / actualizado["ipc_actual"]
+    actualizado["MontoActualizado"] = actualizado["saldo"] / (actualizado["indicador_macro_vl"] / actualizado["ipc_base"])
     
     final = actualizado[["indicador_macro_fc","segmento","MontoActualizado"]].copy()
     final.columns = ["Fecha","Producto","Montos"]
-    productoacuenta = {"CC mino":"Cuentas Vista",
-                       "CC mayo":"Cuentas Corrientes",
-                       "CA no Mesa":"Cajas de Ahorro Mesa",
-                       "CA trans":"Cajas de Ahorro Resto",
-                       "CA no trans":"Cajas de Ahorro Resto Nueva Estructura"}
-    
-    for key in productoacuenta:
-        final.loc[final["Producto"] == key,["Producto"]] = productoacuenta[key]
+    productoacuenta = {"CC mino":"CC mino",
+                       "CC mayo":"CC mayo",
+                       "CA no Mesa":"CA no Mesa",
+                       "CA trans":"CA trans",
+                       "CA no trans":"CA no trans"}
         
-    return final
+    Ponderando = {}
+    for producto in productoacuenta.values():
+        Ponderando[producto] = final.loc[(final["Producto"] == producto) & (final["Fecha"] == max(final["Fecha"])),"Montos"].values[0]
+    
+    saldoCC = Ponderando["CC mino"] + Ponderando["CC mayo"]
+    saldoCA = Ponderando["CA no Mesa"] + Ponderando["CA trans"] + Ponderando["CA no trans"]
+    
+    for producto in Ponderando.keys():
+        if producto[0:2] == "CA":
+            Ponderando[producto] /= saldoCA
+        else:
+            Ponderando[producto] /= saldoCC
+    
+    return final,Ponderando
 
 def triangulo(df,Productos,fechas,nodos):
     
@@ -92,44 +103,69 @@ def triangulo(df,Productos,fechas,nodos):
                 array[i] = 0
         arrayProductos[producto] = array
         
-        Output = pd.DataFrame.from_dict(arrayProductos)
-        Output.index = nodos
-        Output = Output.truncate(after = 1800)
+    Output = pd.DataFrame.from_dict(arrayProductos)
+    Output.index = nodos
+    Output = Output.truncate(after = 1800)
 
     for producto in Output:
         total = 0
         finished = False
-        for index in Output[producto].index:
-            if (total + Output[producto][index] < 1) & (finished == False):
-                total += Output[producto][index]
-            else:
-                Output[producto][index] = 0
-                finished = True
-            
+        if producto in ("Cuentas Corrientes Mino","Cajas de Ahorro Resto No Trans"):
+            for index in Output[producto].index:
+                if (total + Output[producto][index] < 0.5) & (finished == False):
+                    total += Output[producto][index]
+                elif finished == False:
+                    Output[producto][index] = 1-total
+                    finished = True
+                else:
+                    Output[producto][index] = 0
+        else:
+            for index in Output[producto].index:
+                if (total + Output[producto][index] < 1) & (finished == False):
+                    total += Output[producto][index]
+                elif finished == False:
+                    Output[producto][index] = 1-total
+                    finished = True
+                else:
+                    Output[producto][index] = 0
+        
     return Output
 
 
-def distribuyeCaida(caidas,Desarrollos,vida_promedio):
+def distribuyeCaida(caidas,Desarrollos,vida_promedio, ponderacion):
     
     nodos = np.arange(60)*30+30
 
-    for producto in Resultado:
+    for producto in ["Cuentas Corrientes","Cajas de Ahorro Resto"]:
         CaidaAssist = caidas[(caidas["Cuenta"] == producto) & (caidas["Moneda"] == "ARS")]
-        ResultadoAssist = Resultado[producto]
+        if producto == "Cuentas Corrientes":
+            ResultadoAssist = [Desarrollos["Cuentas Corrientes Mino"],
+                               Desarrollos["Cuentas Corrientes Mayo"]]
+        else:
+            ResultadoAssist = [Desarrollos["Cajas de Ahorro Resto No Mesa"],
+                               Desarrollos["Cajas de Ahorro Resto Trans"],
+                               Desarrollos["Cajas de Ahorro Resto No Trans"]]
+        
         Monto = CaidaAssist[30].values[0]
-        CaidaVP = Monto * 0.5
-        CaidaDesarrollos = Monto * 0.5
-        for nodo in nodos:
-            CaidaAssist.loc[CaidaAssist.index[0],nodo] = CaidaDesarrollos * ResultadoAssist[nodo]
-            if nodo >= vida_promedio:
-                CaidaAssist.loc[CaidaAssist.index[0],nodo] = CaidaAssist.loc[CaidaAssist.index[0],nodo] + CaidaVP
-                vida_promedio = 3600
+        CaidaAssist[30].values[0] = 0
+        
+        for desarrollo in ResultadoAssist:
+            if desarrollo.name in ("Cuentas Corrientes Mino","Cajas de Ahorro Resto No Trans"):
+                for nodo in nodos:
+                    CaidaAssist.loc[CaidaAssist.index[0],nodo] += Monto * ponderacion[desarrollo.name] * desarrollo[nodo]
+                for nodo in nodos:
+                    if nodo >= vida_promedio:
+                        CaidaAssist.loc[CaidaAssist.index[0],nodo] += Monto * 0.5 * ponderacion[desarrollo.name]
+                        break
+            else:
+                for nodo in nodos:
+                    CaidaAssist.loc[CaidaAssist.index[0],nodo] += Monto * ponderacion[desarrollo.name] * desarrollo[nodo]
         caidas.loc[CaidaAssist.index[0],:] = CaidaAssist.loc[CaidaAssist.index[0],:]
 
 
 def ejecutoTriangulo(dfCaidas):
 
-    df = importaTriangulo()
+    df,ponderacion = importaTriangulo()
     
     fechas = pd.to_datetime(df['Fecha']).dt.date.drop_duplicates().values
     
@@ -139,12 +175,12 @@ def ejecutoTriangulo(dfCaidas):
     
     Resultado = triangulo(df, Productos, fechas, nodos)
     
-    return Resultado
+    return Resultado, ponderacion
 
-Caidas = pd.DataFrame()
+Caidas = pd.read_excel("Caidas V3.xlsx")
 
-Resultado = ejecutoTriangulo(Caidas)
+Resultado, ponderacion = ejecutoTriangulo(Caidas)
 
 vida_promedio = 362.5 #CalcVidaPromedio(df,FiltroMoneda=moneda,FiltroBalance=balance)
 
-distribuyeCaida(Caidas,Resultado,vida_promedio)
+distribuyeCaida(Caidas,Resultado,vida_promedio,ponderacion)
