@@ -2,11 +2,11 @@ import pandas as pd
 import numpy as np
 import statsmodels.formula.api as smf
 
-df = pd.read_excel('Calibracion PD.xlsx')
+df = pd.read_excel('C:/Users/mathias.ezequiel.va1/Desktop/Banco Galicia - Capital Economico/GitKrakenRepos/bg-ce-22/CERCE/inputs/Calibracion PD.xlsx')
 
 #Paso las features de numpy a Pandas
 
-df_X = pd.DataFrame(df, columns = ['score'])
+df_X = pd.DataFrame(df, columns = ['score_comportamental','score_balance'])
 
 # Agrego la variable dependiente
 
